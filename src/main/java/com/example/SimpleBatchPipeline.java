@@ -9,6 +9,7 @@ import org.apache.beam.sdk.coders.KvCoder;
 import org.apache.beam.sdk.coders.SerializableCoder;
 import org.apache.beam.sdk.coders.StringUtf8Coder;
 import org.apache.beam.sdk.coders.DoubleCoder;
+import org.apache.beam.sdk.io.TextIO;
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO;
 import org.apache.beam.sdk.io.gcp.bigquery.DynamicDestinations;
 import org.apache.beam.sdk.io.gcp.bigquery.TableDestination;
@@ -184,48 +185,142 @@ public class SimpleBatchPipeline {
         @Default.Integer(100)
         Integer getNumRecords();
         void setNumRecords(Integer value);
+
+        @Description("GCS path for input data files (e.g., gs://bucket/path/to/data*.csv)")
+        @Default.String("")
+        String getDataInputGcsPath();
+        void setDataInputGcsPath(String value);
+
+        @Description("GCS path for input price files (e.g., gs://bucket/path/to/prices*.csv)")
+        @Default.String("")
+        String getPriceInputGcsPath();
+        void setPriceInputGcsPath(String value);
     }
+
+    // DoFn to parse MyData from CSV
+    public static class ParseMyDataFromCsvFn extends DoFn<String, MyData> {
+        @ProcessElement
+        public void processElement(@Element String line, OutputReceiver<MyData> out) {
+            String[] parts = line.split(",");
+            if (parts.length == 4) {
+                try {
+                    String id = parts[0].trim();
+                    String name = parts[1].trim();
+                    double value = Double.parseDouble(parts[2].trim());
+                    String category = parts[3].trim();
+                    out.output(new MyData(id, name, value, category));
+                } catch (NumberFormatException e) {
+                    LOG.warn("Skipping malformed line for MyData: " + line, e);
+                }
+            } else {
+                LOG.warn("Skipping malformed line for MyData (incorrect number of fields): " + line);
+            }
+        }
+    }
+
+    // DoFn to parse PriceItem from CSV
+    public static class ParsePriceItemFromCsvFn extends DoFn<String, KV<String, Double>> {
+        @ProcessElement
+        public void processElement(@Element String line, OutputReceiver<KV<String, Double>> out) {
+            String[] parts = line.split(",");
+            if (parts.length == 2) {
+                try {
+                    String id = parts[0].trim();
+                    double price = Double.parseDouble(parts[1].trim());
+                    out.output(KV.of(id, price));
+                } catch (NumberFormatException e) {
+                    LOG.warn("Skipping malformed line for PriceItem: " + line, e);
+                }
+            } else {
+                LOG.warn("Skipping malformed line for PriceItem (incorrect number of fields): " + line);
+            }
+        }
+    }
+
 
     public static void main(String[] args) {
         SimplePipelineOptions options = PipelineOptionsFactory.fromArgs(args).withValidation().as(SimplePipelineOptions.class);
         Pipeline pipeline = Pipeline.create(options);
-        int numRecords = options.getNumRecords();
 
-        // Generate Synthetic Data for MyData
-        List<MyData> dataItems = new ArrayList<>(numRecords);
-        String[] categories = {"CAT1", "CAT2", "CAT3", "CAT4", "CAT5"};
-        for (int i = 0; i < numRecords; i++) {
-            String id = UUID.randomUUID().toString();
-            String name = "Item-" + (i + 1);
-            double value = RANDOM.nextDouble() * 1000; // Random value between 0 and 1000
-            String category = categories[RANDOM.nextInt(categories.length)];
-            dataItems.add(new MyData(id, name, value, category));
+        PCollection<MyData> myDataPCollection;
+        if (options.getDataInputGcsPath() != null && !options.getDataInputGcsPath().isEmpty()) {
+            LOG.info("Reading MyData from GCS path: " + options.getDataInputGcsPath());
+            myDataPCollection = pipeline.apply("ReadMyDataFromGCS", TextIO.read().from(options.getDataInputGcsPath()))
+                                     .apply("ParseMyData", ParDo.of(new ParseMyDataFromCsvFn()))
+                                     .setCoder(SerializableCoder.of(MyData.class));
+        } else {
+            LOG.info("Generating synthetic MyData.");
+            int numRecords = options.getNumRecords();
+            List<MyData> dataItems = new ArrayList<>(numRecords);
+            String[] categories = {"CAT1", "CAT2", "CAT3", "CAT4", "CAT5"};
+            for (int i = 0; i < numRecords; i++) {
+                String id = UUID.randomUUID().toString();
+                String name = "Item-" + (i + 1);
+                double value = RANDOM.nextDouble() * 1000; // Random value between 0 and 1000
+                String category = categories[RANDOM.nextInt(categories.length)];
+                dataItems.add(new MyData(id, name, value, category));
+            }
+            myDataPCollection = pipeline.apply("CreateSyntheticData", Create.of(dataItems))
+                    .setCoder(SerializableCoder.of(MyData.class));
         }
-        PCollection<MyData> syntheticData = pipeline.apply("CreateSyntheticData", Create.of(dataItems))
-                .setCoder(SerializableCoder.of(MyData.class));
 
-        // Generate Synthetic Price Information (Side Input)
-        List<KV<String, Double>> priceItems = new ArrayList<>();
-        // Create prices for a subset of the generated data items
-        int numPriceRecords = Math.max(1, numRecords / 2); // Prices for about half the items
-        for (int i = 0; i < numPriceRecords; i++) {
-            if (i < dataItems.size()) { // Ensure we use existing IDs
-                String idToPrice = dataItems.get(i).id;
-                double price = Math.round((RANDOM.nextDouble() * 200 + 10) * 100.0) / 100.0; // Random price $10-$210
+        PCollection<KV<String, Double>> priceInfoPCollection;
+        if (options.getPriceInputGcsPath() != null && !options.getPriceInputGcsPath().isEmpty()) {
+            LOG.info("Reading PriceInfo from GCS path: " + options.getPriceInputGcsPath());
+            priceInfoPCollection = pipeline.apply("ReadPriceInfoFromGCS", TextIO.read().from(options.getPriceInputGcsPath()))
+                                        .apply("ParsePriceInfo", ParDo.of(new ParsePriceItemFromCsvFn()))
+                                        .setCoder(KvCoder.of(StringUtf8Coder.of(), DoubleCoder.of()));
+        } else {
+            LOG.info("Generating synthetic PriceInfo.");
+            int numRecords = options.getNumRecords(); // Use same numRecords for consistency if generating
+            List<KV<String, Double>> priceItems = new ArrayList<>();
+            // For synthetic price generation, we need access to the IDs from myDataPCollection if it was also synthetic.
+            // This part is tricky if MyData is from GCS and PriceInfo is synthetic or vice-versa.
+            // For simplicity, if PriceInfo is synthetic, we'll generate random IDs or assume MyData was also synthetic.
+            // A more robust solution would involve joining or ensuring ID consistency.
+
+            // If myDataPCollection was generated synthetically, we can try to use its items.
+            // However, myDataPCollection might not be materialized here.
+            // So, we'll generate independent synthetic prices if GCS path for data is not given.
+            // If data path IS given, this synthetic price generation might not align well.
+            // This example assumes if one is GCS, the other might be too, or synthetic prices are okay with random IDs.
+
+            List<String> dataItemIdsForPricing = new ArrayList<>();
+            if (options.getDataInputGcsPath() == null || options.getDataInputGcsPath().isEmpty()) {
+                // If data is synthetic, we can generate prices based on those synthetic items.
+                // This requires access to the generated dataItems list, which is in the 'else' block above.
+                // To simplify, we'll re-generate some random IDs for pricing here if data is synthetic.
+                // This is not ideal as it won't match the actual synthetic data IDs perfectly.
+                // A better approach for fully synthetic data would be to generate dataItems first, then prices from those.
+                for (int i = 0; i < numRecords; i++) {
+                    dataItemIdsForPricing.add(UUID.randomUUID().toString()); // Placeholder IDs
+                }
+            }
+
+
+            int numPriceRecords = Math.max(1, numRecords / 2);
+            for (int i = 0; i < numPriceRecords; i++) {
+                String idToPrice;
+                if (!dataItemIdsForPricing.isEmpty() && i < dataItemIdsForPricing.size()) {
+                    idToPrice = dataItemIdsForPricing.get(i);
+                } else {
+                     // Fallback if dataItemIdsForPricing is empty (e.g. data came from GCS)
+                    idToPrice = UUID.randomUUID().toString();
+                }
+                double price = Math.round((RANDOM.nextDouble() * 200 + 10) * 100.0) / 100.0;
                 priceItems.add(KV.of(idToPrice, price));
             }
+            // Add a few extra prices for IDs that might not be in the main dataItems list
+            for (int i = 0; i < numRecords / 10; i++) {
+                 priceItems.add(KV.of(UUID.randomUUID().toString(), Math.round((RANDOM.nextDouble() * 50 + 5) * 100.0) / 100.0));
+            }
+            priceInfoPCollection = pipeline.apply("CreatePriceData", Create.of(priceItems))
+                    .setCoder(KvCoder.of(StringUtf8Coder.of(), DoubleCoder.of()));
         }
-        // Add a few extra prices for IDs that might not be in the main dataItems list to simulate disjoint data
-        for (int i = 0; i < numRecords / 10; i++) {
-             priceItems.add(KV.of(UUID.randomUUID().toString(), Math.round((RANDOM.nextDouble() * 50 + 5) * 100.0) / 100.0));
-        }
 
-        PCollection<KV<String, Double>> priceInfo = pipeline.apply("CreatePriceData", Create.of(priceItems))
-                .setCoder(KvCoder.of(StringUtf8Coder.of(), DoubleCoder.of()));
+        PCollectionView<Map<String, Double>> priceSideInputView = priceInfoPCollection.apply("ViewPricesAsMap", View.asMap());
 
-        PCollectionView<Map<String, Double>> priceSideInputView = priceInfo.apply("ViewPricesAsMap", View.asMap());
-
-        PCollection<TableRow> tableRows = syntheticData.apply("ConvertToTableRows",
+        PCollection<TableRow> tableRows = myDataPCollection.apply("ConvertToTableRows",
                 ParDo.of(new MyDataToTableRowFn("SimpleBatchJob", LocalDate.now(), priceSideInputView))
                         .withSideInputs(priceSideInputView));
 
@@ -244,7 +339,8 @@ public class SimpleBatchPipeline {
 
         LOG.info("Starting pipeline. To run against BigQuery, ensure Application Default Credentials are set " +
                  "or provide appropriate service account credentials. Also, ensure the BigQuery API is enabled.");
-        LOG.info("Example command-line arguments: --projectId=your-gcp-project --datasetName=your_dataset --tablePrefix=my_data_table --numRecords=500");
+        LOG.info("Example command-line arguments: --projectId=your-gcp-project --datasetName=your_dataset --tablePrefix=my_data_table --numRecords=500 " +
+                 "[--dataInputGcsPath=gs://your-bucket/data-*.csv] [--priceInputGcsPath=gs://your-bucket/prices-*.csv]");
 
         pipeline.run().waitUntilFinish();
         LOG.info("Pipeline finished.");

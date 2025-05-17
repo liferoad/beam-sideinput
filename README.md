@@ -51,6 +51,85 @@ mvn compile exec:java -Dexec.mainClass=com.example.SimpleBatchPipeline -Dexec.ar
 
 This command will execute the pipeline, and you should see log output indicating its progress. Since it's using `DirectRunner`, the actual data processing happens on your local machine.
 
+## Generating Test Data with Python Script
+
+A Python script `generate_and_upload_csv.py` is provided to create sample CSV files for data and price items and upload them to Google Cloud Storage. This can be useful for populating GCS paths that the Beam pipeline can then read from when using the GCS input options.
+
+### 1. Prerequisites for the Python Script
+
+*   Python 3.x installed.
+*   The `google-cloud-storage` Python library. Install it using pip:
+    ```bash
+    pip install google-cloud-storage
+    ```
+*   Authenticated with Google Cloud. The script uses Application Default Credentials. If you haven't already, you might need to run:
+    ```bash
+    gcloud auth application-default login
+    ```
+
+### 2. Running the Python Script
+
+Execute the script from your terminal, providing the required arguments.
+
+**Example Command:**
+
+```bash
+python generate_and_upload_csv.py \
+  --num_records 5000000 \
+  --data_bucket tmp_xqhu \
+  --data_prefix input/data/ \
+  --price_bucket tmp_xqhu \
+  --price_prefix input/prices/
+```
+
+**Explanation of Arguments:**
+
+*   `--num_records`: Total number of data records to generate. Price records will be generated based on this number.
+*   `--data_bucket`: The GCS bucket name where data CSV files will be uploaded (e.g., `tmp_xqhu`).
+*   `--data_prefix`: The GCS prefix (folder path) within the data bucket (e.g., `input/data/`).
+*   `--price_bucket`: The GCS bucket name where price CSV files will be uploaded (e.g., `tmp_xqhu`).
+*   `--price_prefix`: The GCS prefix (folder path) within the price bucket (e.g., `input/prices/`).
+
+The script will create CSV files locally in a `generated_csvs` directory (which it cleans up afterwards) and upload them in batches to the specified GCS locations. Each batch file will contain up to 1000 records.
+
+Once the files are uploaded, you can use their GCS paths (e.g., `gs://tmp_xqhu/input/data/data_batch_*.csv` and `gs://tmp_xqhu/input/prices/price_batch_*.csv`) with the Beam pipeline's `--dataInputGcsPath` and `--priceInputGcsPath` options.
+
+## Running with GCS Data Source
+
+This section provides examples of how to run the Beam pipeline configured to read data and price information directly from CSV files stored in Google Cloud Storage. This is an alternative to generating synthetic data within the pipeline. Ensure you have first generated and uploaded these files to GCS (e.g., using the Python script described above).
+
+### 1. Using DirectRunner with GCS Input
+
+Execute the following Maven command to compile and run the pipeline locally, reading from GCS:
+
+```bash
+mvn compile exec:java -Dexec.mainClass=com.example.SimpleBatchPipeline -Dexec.args="--runner=DirectRunner --projectId=manav-jit-test --datasetName=dummy_dataset_sideinput --tablePrefix=gcs_input_table --tempLocation=gs://tmp_xqhu/sideinput/ --dataInputGcsPath=gs://tmp_xqhu/input/data/data_batch_*.csv --priceInputGcsPath=gs://tmp_xqhu/input/prices/price_batch_*.csv"
+```
+
+**Key GCS Input Arguments:**
+
+*   `--dataInputGcsPath=gs://tmp_xqhu/input/data/data_batch_*.csv`: Specifies the GCS path pattern for the input data CSV files. The `*` acts as a wildcard.
+*   `--priceInputGcsPath=gs://tmp_xqhu/input/prices/price_batch_*.csv`: Specifies the GCS path pattern for the input price CSV files.
+*   The `--numRecords` argument is not strictly necessary here for data generation if GCS paths are valid and contain files, as the pipeline will prioritize reading from GCS.
+
+All other arguments (`--projectId`, `--datasetName`, `--tablePrefix`, `--tempLocation`) are similar to the synthetic data example.
+
+### 2. Using DataflowRunner with GCS Input
+
+Execute the following Maven command to compile and run the pipeline on Dataflow, reading from GCS:
+
+```bash
+mvn compile exec:java -Dexec.vmArgs="-Xmx32g" -Dexec.mainClass=com.example.SimpleBatchPipeline -Dexec.args="--runner=DataflowRunner --projectId=manav-jit-test --region=us-central1 --tempLocation=gs://tmp_xqhu/sideinput/ --datasetName=dummy_dataset_sideinput --tablePrefix=gcs_input_table_df --dataInputGcsPath=gs://tmp_xqhu/input/data/data_batch_*.csv --priceInputGcsPath=gs://tmp_xqhu/input/prices/price_batch_*.csv"
+```
+
+**Key GCS Input Arguments:**
+
+*   `--dataInputGcsPath=gs://tmp_xqhu/input/data/data_batch_*.csv`: GCS path pattern for input data files.
+*   `--priceInputGcsPath=gs://tmp_xqhu/input/prices/price_batch_*.csv`: GCS path pattern for input price files.
+*   Again, `--numRecords` is optional if GCS files are the intended source.
+
+This command submits the pipeline to Google Cloud Dataflow, configured to read its main and side inputs from the specified GCS locations.
+
 ## Running with DataflowRunner (Google Cloud)
 
 This section describes how to run the pipeline on Google Cloud Dataflow.
@@ -69,7 +148,7 @@ This section describes how to run the pipeline on Google Cloud Dataflow.
 Execute the following Maven command to compile and run the pipeline on Dataflow:
 
 ```bash
-mvn compile exec:java -Dexec.vmArgs="-Xmx32g" -Dexec.mainClass=com.example.SimpleBatchPipeline -Dexec.args="--runner=DataflowRunner --projectId=manav-jit-test --region=us-central1 --tempLocation=gs://tmp_xqhu/sideinput/ --datasetName=dummy_dataset_sideinput --tablePrefix=dummy-table --numRecords=5000000"
+mvn compile exec:java -Dexec.vmArgs="-Xmx32g" -Dexec.mainClass=com.example.SimpleBatchPipeline -Dexec.args="--runner=DataflowRunner --projectId=manav-jit-test --region=us-central1 --tempLocation=gs://tmp_xqhu/sideinput/ --datasetName=dummy_dataset_sideinput --tablePrefix=dummy-table --numRecords=50000"
 ```
 
 **Explanation of Arguments:**
@@ -97,6 +176,20 @@ bq query --nouse_legacy_sql \
   SELECT COUNT(*) AS total_rows FROM `manav-jit-test.dummy_dataset_sideinput.dummy-table_cat3` UNION ALL
   SELECT COUNT(*) AS total_rows FROM `manav-jit-test.dummy_dataset_sideinput.dummy-table_cat4` UNION ALL
   SELECT COUNT(*) AS total_rows FROM `manav-jit-test.dummy_dataset_sideinput.dummy-table_cat5`
+)
+'
+```
+
+For GCS sources,
+
+```bash
+bq query --nouse_legacy_sql \
+'SELECT SUM(total_rows) AS grand_total_rows FROM (
+  SELECT COUNT(*) AS total_rows FROM `manav-jit-test.dummy_dataset_sideinput.gcs_input_table_df_cat1` UNION ALL
+  SELECT COUNT(*) AS total_rows FROM `manav-jit-test.dummy_dataset_sideinput.gcs_input_table_df_cat2` UNION ALL
+  SELECT COUNT(*) AS total_rows FROM `manav-jit-test.dummy_dataset_sideinput.gcs_input_table_df_cat3` UNION ALL
+  SELECT COUNT(*) AS total_rows FROM `manav-jit-test.dummy_dataset_sideinput.gcs_input_table_df_cat4` UNION ALL
+  SELECT COUNT(*) AS total_rows FROM `manav-jit-test.dummy_dataset_sideinput.gcs_input_table_df_cat5`
 )
 '
 ```
