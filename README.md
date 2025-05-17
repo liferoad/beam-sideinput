@@ -69,7 +69,7 @@ This section describes how to run the pipeline on Google Cloud Dataflow.
 Execute the following Maven command to compile and run the pipeline on Dataflow:
 
 ```bash
-mvn compile exec:java -Dexec.mainClass=com.example.SimpleBatchPipeline -Dexec.args="--runner=DataflowRunner --projectId=manav-jit-test --region=us-central1 --tempLocation=gs://tmp_xqhu/sideinput/ --datasetName=dummy_dataset_sideinput --tablePrefix=dummy-table --numRecords=500"
+mvn compile exec:java -Dexec.vmArgs="-Xmx32g" -Dexec.mainClass=com.example.SimpleBatchPipeline -Dexec.args="--runner=DataflowRunner --projectId=manav-jit-test --region=us-central1 --tempLocation=gs://tmp_xqhu/sideinput/ --datasetName=dummy_dataset_sideinput --tablePrefix=dummy-table --numRecords=5000000"
 ```
 
 **Explanation of Arguments:**
