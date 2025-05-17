@@ -11,27 +11,41 @@
         <maven.compiler.source>1.8</maven.compiler.source>
         <maven.compiler.target>1.8</maven.compiler.target>
         <beam.version>2.65.0</beam.version> <!-- Use a recent Beam version -->
-        <slf4j.version>1.7.32</slf4j.version>
+        <slf4j.version>2.0.16</slf4j.version>
         <google.cloud.bigquery.version>v2-rev20230502-2.0.0</google.cloud.bigquery.version> <!-- Check for latest compatible version -->
         <exec.mainClass>com.example.SimpleBatchPipeline</exec.mainClass>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.apache.beam</groupId>
+                <artifactId>beam-sdks-java-google-cloud-platform-bom</artifactId>
+                <version>${beam.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <!-- Apache Beam SDKs -->
         <dependency>
             <groupId>org.apache.beam</groupId>
             <artifactId>beam-sdks-java-core</artifactId>
-            <version>${beam.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.beam</groupId>
             <artifactId>beam-sdks-java-io-google-cloud-platform</artifactId>
-            <version>${beam.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.beam</groupId>
             <artifactId>beam-runners-direct-java</artifactId>
-            <version>${beam.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.beam</groupId>
+            <artifactId>beam-runners-google-cloud-dataflow-java</artifactId>
             <scope>runtime</scope>
         </dependency>
 
