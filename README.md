@@ -38,7 +38,7 @@ If the dataset already exists, the `bq mk` command will indicate that.
 Execute the following Maven command to compile and run the pipeline:
 
 ```bash
-mvn compile exec:java -Dexec.mainClass=com.example.SimpleBatchPipeline -Dexec.args="--runner=DirectRunner --projectId=manav-jit-test --datasetName=dummy_dataset_sideinput --tablePrefix=dummy-table --tempLocation=gs://tmp_xqhu/sideinput/"
+mvn compile exec:java -Dexec.mainClass=com.example.SimpleBatchPipeline -Dexec.args="--runner=DirectRunner --projectId=manav-jit-test --datasetName=dummy_dataset_sideinput --tablePrefix=dummy-table --tempLocation=gs://tmp_xqhu/sideinput/ --numRecords=10"
 ```
 
 **Explanation of Arguments:**
