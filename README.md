@@ -128,6 +128,12 @@ The Maven command to run Dataflow with GCS input and disable Dataflow Runner V2 
 mvn compile exec:java -Dexec.vmArgs="-Xmx32g" -Dexec.mainClass=com.example.SimpleBatchPipeline -Dexec.args="--runner=DataflowRunner --projectId=manav-jit-test --region=us-central1 --tempLocation=gs://tmp_xqhu/sideinput/ --datasetName=dummy_dataset_sideinput --tablePrefix=gcs_input_table_df --dataInputGcsPath=gs://tmp_xqhu/input/data/data_batch_*.csv --priceInputGcsPath=gs://tmp_xqhu/input/prices/price_batch_*.csv --experiments=disable_runner_v2"
 ```
 
+Run with `workerMachineType` and `maxNumWorkers`:
+
+```bash
+mvn compile exec:java -Dexec.vmArgs="-Xmx32g" -Dexec.mainClass=com.example.SimpleBatchPipeline -Dexec.args="--runner=DataflowRunner --projectId=manav-jit-test --region=us-central1 --tempLocation=gs://tmp_xqhu/sideinput/ --datasetName=dummy_dataset_sideinput --tablePrefix=gcs_input_table_df --dataInputGcsPath=gs://tmp_xqhu/input/data/data_batch_*.csv --priceInputGcsPath=gs://tmp_xqhu/input/prices/price_batch_*.csv --workerMachineType=n1-highmem-8 --maxNumWorkers=15"
+```
+
 **Key GCS Input Arguments:**
 
 *   `--dataInputGcsPath=gs://tmp_xqhu/input/data/data_batch_*.csv`: GCS path pattern for input data files.
