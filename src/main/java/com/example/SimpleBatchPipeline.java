@@ -195,6 +195,11 @@ public class SimpleBatchPipeline {
         @Default.String("")
         String getPriceInputGcsPath();
         void setPriceInputGcsPath(String value);
+
+        @Description("Use Storage Write API for BigQueryIO. Default is false (uses FILE_LOADS).")
+        @Default.Boolean(false)
+        Boolean getUseStorageWriteApi();
+        void setUseStorageWriteApi(Boolean value);
     }
 
     // DoFn to parse MyData from CSV
@@ -324,7 +329,7 @@ public class SimpleBatchPipeline {
                 ParDo.of(new MyDataToTableRowFn("SimpleBatchJob", LocalDate.now(), priceSideInputView))
                         .withSideInputs(priceSideInputView));
 
-        tableRows.apply("WriteToBigQuery", BigQueryIO
+        BigQueryIO.Write<TableRow> bigQueryWriteTransform = BigQueryIO
                 .<TableRow>write()
                 .to(new SimpleDynamicDestinations(options.getProjectId(), options.getDatasetName(), options.getTablePrefix()))
                 .withFormatFunction(row -> {
@@ -332,10 +337,18 @@ public class SimpleBatchPipeline {
                     clonedRow.set("processed_timestamp", System.currentTimeMillis() / 1000.0); // Use double for BQ TIMESTAMP
                     return clonedRow;
                 })
-                .withMethod(BigQueryIO.Write.Method.FILE_LOADS)
                 .withWriteDisposition(BigQueryIO.Write.WriteDisposition.WRITE_APPEND)
-                .withCreateDisposition(BigQueryIO.Write.CreateDisposition.CREATE_IF_NEEDED)
-        );
+                .withCreateDisposition(BigQueryIO.Write.CreateDisposition.CREATE_IF_NEEDED);
+
+        // Conditionally set the BQ write method
+        if (options.getUseStorageWriteApi()) {
+            LOG.info("Using STORAGE_WRITE_API method for BigQuery.");
+            bigQueryWriteTransform = bigQueryWriteTransform.withMethod(BigQueryIO.Write.Method.STORAGE_WRITE_API);
+        } else {
+            LOG.info("Using FILE_LOADS method for BigQuery.");
+            bigQueryWriteTransform = bigQueryWriteTransform.withMethod(BigQueryIO.Write.Method.FILE_LOADS);
+        }
+        tableRows.apply("WriteToBigQuery", bigQueryWriteTransform);
 
         LOG.info("Starting pipeline. To run against BigQuery, ensure Application Default Credentials are set " +
                  "or provide appropriate service account credentials. Also, ensure the BigQuery API is enabled.");
